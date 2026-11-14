@@ -793,6 +793,31 @@ test("string format - email", () => {
   expect(schema.parse("test@example.com")).toBe("test@example.com");
 });
 
+test("string format - idn-email", () => {
+  const schema = fromJSONSchema({ type: "string", format: "idn-email" });
+  expect(schema.safeParse("josé@exämple.com").success).toBe(true);
+  expect(schema.safeParse("not an email").success).toBe(false);
+});
+
+test("pattern and patternProperties use unicode mode, falling back for patterns invalid under `u`", () => {
+  const letters = fromJSONSchema(z.toJSONSchema(z.string().regex(/^\p{L}+$/u)));
+  expect(letters.safeParse("josé").success).toBe(true);
+  expect(letters.safeParse("p{L}").success).toBe(false);
+
+  const legacy = fromJSONSchema({ type: "string", pattern: "^[\\w-.]+\\-$" });
+  expect(legacy.safeParse("a.b-").success).toBe(true);
+  expect(legacy.safeParse("a b-").success).toBe(false);
+
+  const keys = fromJSONSchema({
+    type: "object",
+    patternProperties: { "^\\p{Lu}": { type: "number" } },
+    additionalProperties: false,
+  });
+  expect(keys.safeParse({ Éa: 1 }).success).toBe(true);
+  expect(keys.safeParse({ Éa: "x" }).success).toBe(false);
+  expect(keys.safeParse({ éa: 1 }).success).toBe(false);
+});
+
 test("string format - uuid", () => {
   const schema = fromJSONSchema({
     type: "string",

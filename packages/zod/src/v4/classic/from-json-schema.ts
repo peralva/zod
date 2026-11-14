@@ -1,4 +1,5 @@
 import type * as JSONSchema from "../core/json-schema.js";
+import { idnEmail } from "../core/regexes.js";
 import { type $ZodRegistry, globalRegistry } from "../core/registries.js";
 import { assignProp, isPlainObject } from "../core/util.js";
 import * as _checks from "./checks.js";
@@ -387,6 +388,15 @@ function getTupleRest(restSchema: JSONSchema._JSONSchema | undefined, ctx: Conve
 // the RFC 3339 full-time keyword, narrower than `z.iso.time()`; local because sharing it via `timeSource` pins that builder into every bundle (+139 B gzipped on a mini `z.boolean()`)
 const fullTime = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
+// unicode mode so `\p{…}` works, falling back for patterns only valid without `u` (`\-`, `[\w-.]`)
+function compilePattern(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern, "u");
+  } catch {
+    return new RegExp(pattern);
+  }
+}
+
 function convertBaseSchema(schema: JSONSchema.JSONSchema, ctx: ConversionContext): ZodType {
   // Handle unsupported features
   if (schema.not !== undefined) {
@@ -510,6 +520,8 @@ function convertBaseSchema(schema: JSONSchema.JSONSchema, ctx: ConversionContext
         // Map common formats to Zod check functions
         if (format === "email") {
           stringSchema = stringSchema.check(z.email());
+        } else if (format === "idn-email") {
+          stringSchema = stringSchema.check(z.email({ pattern: idnEmail }));
         } else if (format === "uri" || format === "uri-reference") {
           stringSchema = stringSchema.check(z.url());
         } else if (format === "uuid" || format === "guid") {
@@ -574,7 +586,7 @@ function convertBaseSchema(schema: JSONSchema.JSONSchema, ctx: ConversionContext
       }
       if (schema.pattern) {
         // JSON Schema patterns are not implicitly anchored (match anywhere in string)
-        stringSchema = stringSchema.regex(new RegExp(schema.pattern));
+        stringSchema = stringSchema.regex(compilePattern(schema.pattern));
       }
 
       zodSchema = stringSchema;
@@ -648,7 +660,7 @@ function convertBaseSchema(schema: JSONSchema.JSONSchema, ctx: ConversionContext
 
         for (const pattern of patternKeys) {
           const patternValue = convertSchema(patternProps[pattern] as JSONSchema.JSONSchema, ctx);
-          const keySchema = z.string().regex(new RegExp(pattern));
+          const keySchema = z.string().regex(compilePattern(pattern));
           looseRecords.push(z.looseRecord(keySchema, patternValue));
         }
 
@@ -676,7 +688,7 @@ function convertBaseSchema(schema: JSONSchema.JSONSchema, ctx: ConversionContext
         // When additionalProperties is false, reject keys that are neither defined in properties nor matched by any patternProperty.
         if (schema.additionalProperties === false) {
           const propertyKeys = Object.keys(shape);
-          const patterns = patternKeys.map((p) => new RegExp(p));
+          const patterns = patternKeys.map(compilePattern);
           const basePatternSchema = zodSchema;
           zodSchema = zodSchema.check((payload) => {
             if (!isPlainObject(payload.value)) return;
